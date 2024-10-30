@@ -1,7 +1,7 @@
 abstract type ConfigSettings end
 
-@derived_dimension BoltzmannConstUnits 𝐌*(𝐋^2)*(𝐓^-2)*(𝚯^-1) true
-@derived_dimension MolarBoltzmannConstUnits 𝐌*(𝐋^2)*(𝐓^-2)*(𝚯^-1)*(𝐍^-1) true
+@derived_dimension BoltzmannConstUnits Unitful.𝐌*(Unitful.𝐋^2)*(Unitful.𝐓^-2)*(Unitful.𝚯^-1) true
+@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*(Unitful.𝐋^2)*(Unitful.𝐓^-2)*(Unitful.𝚯^-1)*(Unitful.𝐍^-1) true
 
 @derived_dimension hBarUnits (𝐋^2)* 𝐌 * (𝐓^-1)
 @derived_dimension MolarhBarUnits

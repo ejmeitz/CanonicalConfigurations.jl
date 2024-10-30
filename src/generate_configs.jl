@@ -4,39 +4,13 @@ function bose_einstein(freq, temp, kB, hbar)
     return 1 / (exp(x) - 1)
 end
 
-function amplitude(qc::QuantumConfigs, freq, mass, temp)
-    nᵢ = bose_einstein(freq, temp, qc.kB, qc.hbar)
+function mean_amplitude(qc::QuantumConfigs, freq, mass)
+    nᵢ = bose_einstein(freq, qc.temp, qc.kB, qc.hbar)
     return sqrt((qc.hbar * (2*nᵢ + 1)) / (2 * mass * freq))
 end
 
-function amplitude(cc::ClassicalConfigs, freq, mass, temp)
-    return sqrt((cc.kB*temp)/mass) / freq
-end
-
-function imaginary_mode_present(freqs::AbstractVector, tol = 1e-6)
-    for freq in freqs
-        if ustrip(abs(imag(freq))) > tol
-            return true
-        end
-    end
-    return false
-end
-
-# Assumes there are D modes with freuqency 0
-function rigid_translation_modes(freqs, D::Int)
-    idx_rt = sortperm(abs.(freqs))
-    return SVector(idx_rt[1:D]...)
-end
-
-struct SelfConsistentConfigs{C,K,H,T}
-    configs::Matrix{C}
-    freq_checkpoints::Matrix{Float32}
-    dynmat_checkpoints::Array{Float32, 3}
-    checkpoint_idxs::Vector{Int}
-    kB::K
-    hbar::H
-    temp::T
-    n_iters::Int
+function mean_amplitude(cc::ClassicalConfigs, freq, mass, temp)
+    return sqrt((cc.kB*cc.temp)/mass) / freq
 end
 
 function check_mode(mode::Symbol)
@@ -46,42 +20,59 @@ function check_mode(mode::Symbol)
 end
 
 function extend_masses!(atom_masses, D)
-
+    return collect(Iterators.flatten(Iterators.repeated(el, D) for el in atom_masses))
 end
 
-function prune_rt_modes!(freqs, phi, rtm_idxs)
-    # Remove rigid translation modes from freqs and phi
-    freqs = deleteat!(freqs, rtm_idxs)
+function prune_freqs_phi!(freqs, phi, D::Int)
+    idx_rt = sortperm(abs.(freqs))
+    if idx_rt != 1:D
+        throw(ArgumentError("First D modes should be rigid translation modes, got $(idx_rt). There might be imaginary modes present"))
+    end
+
+    # Remove first D elements from freqs and phi
+    freqs = freqs[D+1:end]
+    phi = phi[:, D+1:end]
+
+    return freqs, phi
 end
 
 #* Change signature to not enforce SVector/MVector
 #* in examples use those though
-function canonical_configs(CM::ConfigMode, N_atoms::Int, freqs::AbstractVector{T},
+function canonical_configs(CM::ConfigMode, freqs::AbstractVector{T},
                          phi::AbstractMatrix{T}, eq_positions::AbstractVector{SVector{D, Unitful.Length{T}}},
-                         atom_masses::AbstractVector{Unitful.Mass{T}}, temp::Unitful.Temperature{T}, mode::Symbol;
+                         atom_masses::AbstractVector{Unitful.Mass{T}}, mode::Symbol;
                          nthreads::Int = Threads.nthreads()) where {T,D}
 
     check_mode(mode)
 
+    N_atoms = length(eq_positions)
+
     # Remvoe rigid translation modes from freqs and phi
-    rtm_idxs = rigid_translation_modes(freqs, D)
-    prune_rt_modes!(freqs, phi, rtm_idxs)
+    # This makes it possible to broadcast without DivideByZero
+    freqs, phi = prepare_freqs_phi!(freqs, phi, D)
 
     # Extend mass vector so there are D copies of each mass per atom
-    # This makes broadcasting over N_dof easier
+    # This makes broadcasting easier, could also rehspae phi to be (D*N_atoms - D) x N_atoms x 3
     extend_masses!(atom_masses, D)
-    atom_masses_T = transpose(atom_masses) # can this be done in place?
+    atom_masses_T = transpose(atom_masses) #& can this be done in place?
 
     # Create storage
-    randn_storage = zeros(T, N_dof - D)
-    # config_storage = zeros(MVector{D, Unitful.Length{T}}, N_dof, n_configs) #* idk how to do this with mvectors
+    randn_storage = zeros(T, D*N_atoms)
+    configs = zeros(eltype(first(eq_positions)), D*N_atoms, n_configs)
+
+    time_unit = u"ps"
+    velos = #*TODO
+
+    # Pre-calculate phi * mean amplitudes
+    phi_A = phi * mean_amplitude.(Ref(CM), freqs, atom_masses_T) # D*N_atoms - D x D*N_atoms 
 
     # bar = ProgressBar(1:n_configs; printing_delay = 0.1)
     # set_description(bar, "Making Configs")
     # p = Progress(n_configs; desc="Generating Configs", dt = 0.2)
     @tasks for n in 1:n_configs
         @set ntasks = nthreads
-        canonical_config!(config_storage[n], randn_storage, phi, freqs, atom_masses_T)
+        randn!(randn_storage)
+        configs[:, n] .= phi_A * randn_storage
         configs[:, n] .+= eq_positions
         # next!(p)
     end
@@ -91,26 +82,47 @@ function canonical_configs(CM::ConfigMode, N_atoms::Int, freqs::AbstractVector{T
 end
 
 
-function canonical_config!(
-                            config_storage::AbstractArray{MVector{D, Unitful.Length{T}}, 1}, #typically passed as view to larger array
-                            randn_storage::AbstractMatrix{T}, #unitless
-                            phi::AbstractMatrix{T}, #unitless
-                            freqs::AbstractVector{Unitful.Frequency{T}},
-                            atom_masses_T::AbstractVector{Unitful.Mass{T}}
-                        ) where {D,T}
-    # Assumes `freqs` are passed with the rigid translation modes removed
-        # to facilitate broadcasting. The corresponding columns from `phi`` should also be removed.
-    
-    # Assumes mass vector is duplicated  so that each dof has a mass
-        # Again to facilitate broadcasting. Also this should be Transposed.
+# """
+#     canonical_config!(CM::ConfigMode,
+#                       config_storage::AbstractArray{Unitful.Length{T}, 1},
+#                       randn_storage::AbstractVector{T},
+#                       phi::AbstractMatrix{T},
+#                       freqs::AbstractVector{Unitful.Frequency{T}},
+#                       atom_masses_T::AbstractVector{Unitful.Mass{T}}
+#                     ) where {T}
 
-    randn!(randn_storage) #* spawn rng in parent task?
+# Calculates a single canonical configuration.
 
-    # amplitude(freqs[m], atom_masses[i], kB, temp) --> should be N_dof x len(atom_masses)
-    # configs[ii] += (A * z[m] * phi[ii, m])
+# Parameters:
+# -----------
+# - `CM : ConfigMode`
+#     Configuration data. Either `QuantumConfigSettings` or `ClassicalConfigSettings`
+# - `config_storage : AbstractArray{Unitful.Length{T}, 1}`
+#     Storage for the configuration. Typically a view to a larger array. Size : D*N_atoms x 1
+# - `randn_storage : AbstractVector{T}`
+#     Storage for the random numbers. Size : D*N_atoms x 1
+# - `phi : AbstractMatrix{T}`
+#     Eigenvectors of the dynamical matrix with the columns corresponding to the rigid
+#     translation modes (ω = 0) removed. Size : D*N_atoms x D*N_atoms - D
+# - `freqs : AbstractVector{Unitful.Frequency{T}}`
+#     Frequencies of the normal modes with the rigid translation modes (ω = 0) removed.
+#     Size : D*N_atoms - D x 1
+# - `atom_masses_T : AbstractVector{Unitful.Mass{T}}`
+#     Masses of the atoms as a row vector. Expects each mass to be duplicated `D` times per
+#     atom to enable broadcasting. Size : 1 x D*N_atoms
+# """
+# function canonical_config!(CM::ConfigSettings,
+#                             config_storage::AbstractArray{Unitful.Length{T}, 1},
+#                             randn_storage::AbstractVector{T},
+#                             phi::AbstractMatrix{T},
+#                             freqs::AbstractVector{Unitful.Frequency{T}},
+#                             atom_masses_T::AbstractVector{Unitful.Mass{T}}
+#                         ) where {T}
 
-    #& think I need to broadcast over masses transposed
-    config_storage .= amplitude.(CM, freqs, atom_masses_T, temp) .* (phi * randn_storage) #* dont think this works? mass/freq indexing weird
+#     randn!(randn_storage) #* spawn rng in parent task?
 
-    return config_storage
-end
+#     # Can I avoid the matrix allocation on amplitude?
+#     config_storage .= phi_A * randn_storage
+
+#     return config_storage
+# end
