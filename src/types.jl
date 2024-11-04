@@ -1,20 +1,35 @@
+export QuantumConfigSettings, ClassicalConfigSettings
+
 abstract type ConfigSettings end
 
-@derived_dimension BoltzmannConstUnits Unitful.𝐌*(Unitful.𝐋^2)*(Unitful.𝐓^-2)*(Unitful.𝚯^-1) true
-@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*(Unitful.𝐋^2)*(Unitful.𝐓^-2)*(Unitful.𝚯^-1)*(Unitful.𝐍^-1) true
+const DefaultFloat = Float32
 
-@derived_dimension hBarUnits (𝐋^2)* 𝐌 * (𝐓^-1)
-@derived_dimension MolarhBarUnits
-
-struct QuantumConfigSettings{T} <: ConfigSettings 
-    kB::Union{BoltzmannConstUnits{T}, MolarBoltzmannConstUnits{T}}
-    h_bar::Union{hBarUnits{T}, MolarhBarUnits{T}}
+struct QuantumConfigSettings{K,H} <: ConfigSettings 
+    kB::K
+    h_bar::H
     n_configs::Int
-    temperature::Unitful.Tempearture{T}
+    temperature::typeof(DefaultFloat(1.0u"K"))
 end
 
-struct ClassicalConfigSettings{T} <: ConfigSettings
-    kB::Union{BoltzmannConstUnits{T}, MolarBoltzmannConstUnits{T}}
+function QuantumConfigSettings(kB, h_bar, n_configs, temperature)
+    if check_units(kB, h_bar)
+        return QuantumConfigSettings{typeof(kB), typeof(h_bar)}(
+                        DefaultFloat(kB), DefaultFloat(h_bar), n_configs, DefaultFloat(temperature))
+    else
+        throw(ArgumentError("Units of kB and h_bar are not comensurate. Must both be molar or non-molar."))
+    end
+end
+
+struct ClassicalConfigSettings{K} <: ConfigSettings
+    kB::K
     n_configs::Int
-    tempearture::Unitful.Temperature{T}
+    temperature::typeof(DefaultFloat(1.0u"K"))
+end
+
+function ClassicalConfigSettings(kB, n_configs, temperature)
+    if kB isa BoltzmannConstUnits || kB isa MolarBoltzmannConstUnits
+        return ClassicalConfigSettings{typeof(kB)}(DefaultFloat(kB), n_configs, DefaultFloat(temperature))
+    else
+        throw(ArgumentError("kB does not have proper units."))
+    end
 end

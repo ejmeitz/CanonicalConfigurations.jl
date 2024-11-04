@@ -1,0 +1,17 @@
+name = "CanonicalConfigurations"
+uuid = "f5842f8f-bd57-4c5e-945d-d41c43deff6a"
+authors = ["Ethan Meitz <emeitz@andrew.cmu.edu>"]
+version = "0.0.1"
+
+[deps]
+OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+ThreadPinning = "811555cd-349b-4f26-b7bc-1f208b848042"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+
+[compat]
+OhMyThreads = "0.6, 0.7"
+ProgressMeter = "1.10"
+ThreadPinning = "1"
+Unitful = "1.18"
