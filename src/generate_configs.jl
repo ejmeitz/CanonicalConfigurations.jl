@@ -1,4 +1,4 @@
-export canonical_configs, canonical_configs_and_velocities
+export canonical_configs, canonical_configs_and_velocities, mean_amplitude
 
 function bose_einstein(freq, temp, kB, hbar)
     x =  upreferred((hbar * freq) / (kB * temp))
@@ -6,8 +6,8 @@ function bose_einstein(freq, temp, kB, hbar)
 end
 
 function mean_amplitude(qc::QuantumConfigSettings, freq, mass)
-    nᵢ = bose_einstein(freq, qc.temperature, qc.kB, qc.hbar)
-    return sqrt((qc.hbar * (2*nᵢ + 1)) / (2 * mass * freq))
+    nᵢ = bose_einstein(freq, qc.temperature, qc.kB, qc.h_bar)
+    return sqrt((qc.h_bar * (2*nᵢ + 1)) / (2 * mass * freq))
 end
 
 function mean_amplitude(cc::ClassicalConfigSettings, freq, mass)
@@ -43,12 +43,9 @@ function prepare(freqs, phi, D, atom_masses)
 end
 
 
-#* Change signature to not enforce SVector/MVector
-#* in examples use those though
-#* how to enforce units in signature??
 function canonical_configs(CM::ConfigSettings, freqs::AbstractVector,
                          phi::AbstractMatrix, atom_masses::AbstractVector;
-                         nthreads::Int = Threads.nthreads(), D::Int = 3, length_unit = u"Å")
+                         n_threads::Int = Threads.nthreads(), D::Int = 3, length_unit = u"Å")
     
     N_atoms = Int(length(freqs) / D)
 
@@ -68,7 +65,7 @@ function canonical_configs(CM::ConfigSettings, freqs::AbstractVector,
     p = Progress(CM.n_configs; desc="Generating Disps", dt = 0.1, color = :magenta)
     @tasks for n in 1:CM.n_configs
         @set begin
-            ntasks = nthreads
+            ntasks = n_threads
             scheduler = :static
         end
         @local begin
@@ -91,7 +88,7 @@ end
 
 function canonical_configs_and_velocities(CM::ConfigSettings, freqs::AbstractVector,
                                           phi::AbstractMatrix, atom_masses::AbstractVector;
-                                          nthreads::Int = Threads.nthreads(), length_unit = u"Å",
+                                          n_threads::Int = Threads.nthreads(), length_unit = u"Å",
                                           time_unit = u"ps", D::Int = 3 )
     
     N_atoms = Int(length(freqs) / D)
@@ -112,14 +109,15 @@ function canonical_configs_and_velocities(CM::ConfigSettings, freqs::AbstractVec
     freq_unit = unit(first(freqs_view))
     
     p = Progress(CM.n_configs; desc="Generating Disps & Velos", dt = 0.1, color = :yellow)
+    # reinterpret_type = typeof(first(phi_A) * freq_unit)
     @tasks for n in 1:CM.n_configs
         @set begin
-            ntasks = 1
+            ntasks = n_threads
             scheduler = :static
         end
         @local begin
             tmp = zeros(eltype(phi_A), size(phi_A))
-            tmp2 = zeros(eltype(phi_A * freq_unit) , size(phi_A))
+            tmp2 = zeros(eltype(phi_A * freq_unit) , size(phi_A)) #* this is only needed with unitful
             randn_storage = zeros(DefaultFloat, D*N_atoms - D)
         end
 
@@ -128,7 +126,11 @@ function canonical_configs_and_velocities(CM::ConfigSettings, freqs::AbstractVec
         
         tmp .*= randn_storage
         configs[:, n] .= vec(sum(tmp, dims=1))
-        tmp2 .= tmp .* freqs_view #* not ideal that we need this storage
+
+        # tmp_reinterpret = reinterpret(reinterpret_type, tmp)
+        #tmp_reinterpret .= tmp .* freqs_view
+        tmp2 .= tmp .* freqs_view
+
         velos[:, n] .= vec(sum(tmp2, dims=1))
         next!(p)
     end

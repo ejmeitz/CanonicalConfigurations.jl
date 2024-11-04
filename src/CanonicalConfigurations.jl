@@ -12,6 +12,5 @@ pinthreads(:cores)
 include("types.jl")
 include("units.jl")
 include("generate_configs.jl")
-include("io.jl")
 
 end
