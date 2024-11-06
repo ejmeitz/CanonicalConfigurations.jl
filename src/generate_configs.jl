@@ -139,3 +139,49 @@ function canonical_configs_and_velocities(CM::ConfigSettings, freqs::AbstractVec
 
     return configs, velos
 end
+
+function canonical_velocities(CM::ConfigSettings, freqs::AbstractVector,
+    phi::AbstractMatrix, atom_masses::AbstractVector;
+    n_threads::Int = Threads.nthreads(), D::Int = 3, time_unit = u"ps")
+
+    N_atoms = Int(length(freqs) / D)
+
+    freqs_view, phi_view, atom_masses = prepare(freqs, phi, D, atom_masses)
+
+    phi_view_T = transpose(phi_view)
+    atom_masses_T = transpose(atom_masses)
+    mean_amplitude_matrix = mean_amplitude.(Ref(CM), freqs_view, atom_masses_T) # D*N_atoms - D x D*N_atoms
+
+    # Create storage
+    velo_tmp = 1.0 * (length_unit / time_unit)
+    velos = zeros(typeof(velo_tmp), D*N_atoms, CM.n_configs)
+
+    # Pre-scale modes by their amplitudes
+    phi_A = phi_view_T .* mean_amplitude_matrix # D*N_atoms x D*N_atoms - D
+    freq_unit = unit(first(freqs_view))
+    
+    p = Progress(CM.n_configs; desc="Generating Disps & Velos", dt = 0.1, color = :yellow)
+    # reinterpret_type = typeof(first(phi_A) * freq_unit)
+    @tasks for n in 1:CM.n_configs
+        @set begin
+            ntasks = n_threads
+            scheduler = :static
+        end
+        @local begin
+            # tmp = zeros(eltype(phi_A), size(phi_A))
+            tmp2 = zeros(eltype(phi_A * freq_unit) , size(phi_A))
+            randn_storage = zeros(DefaultFloat, D*N_atoms - D)
+        end
+
+        randn!(randn_storage)
+        # copy!(tmp, phi_A)
+        # tmp .*= randn_storage
+        tmp2 .= (phi_A .* randn_storage) .* freqs_view
+
+        velos[:, n] .= vec(sum(tmp2, dims=1))
+        next!(p)
+    end
+    finish!(p)
+
+    return velos
+end

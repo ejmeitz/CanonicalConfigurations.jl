@@ -9,7 +9,7 @@ using CanonicalConfigurations
 using Statistics
 using ProgressMeter
 using OhMyThreads
-using Measurements
+using Plots
 
 function KE(v, m)
     return 0.5 * sum(v.^2 .* m)
@@ -46,7 +46,7 @@ function energy_from_potential(all_configs, sys_eq::SuperCellSystem, pot::Potent
     return U
 end
 
-function run_loop(ifc_path, pot::StillingerWeberSilicon, crys::Crystal, temp, n_configs::Int)
+function run_loop_var(ifc_path, pot::StillingerWeberSilicon, crys::Crystal, temp, n_configs::Int)
     @info "Running for $(temp)K"
     freqs_sq, phi = load(ifc_path, "freqs_sq", "phi")
     freqs = Float32.(sqrt.(freqs_sq))
@@ -59,8 +59,8 @@ function run_loop(ifc_path, pot::StillingerWeberSilicon, crys::Crystal, temp, n_
     
     kB = uconvert(u"eV / K", Unitful.k)
     h_bar = uconvert(u"eV*s", Unitful.ħ)
-    # settings = QuantumConfigSettings(kB, h_bar, n_configs, temp)
-    settings = ClassicalConfigSettings(kB, n_configs, temp)
+    settings = QuantumConfigSettings(kB, h_bar, n_configs, temp)
+    # settings = ClassicalConfigSettings(kB, n_configs, temp)
     configs, velos = canonical_configs_and_velocities(settings, freqs, phi, atom_masses)
 
     U = energy_from_potential(configs, sys_eq, pot, energy_unit(pot))
@@ -108,8 +108,8 @@ function run_loop_dUdT(ifc_path, pot::StillingerWeberSilicon, crys::Crystal, bas
     K_stds = []
     E_stds = []
     for (i,dT) in enumerate(dTs)
-        # settings = QuantumConfigSettings(kB, h_bar, n_configs, base_temp + dT)
-        settings = ClassicalConfigSettings(kB, n_configs, base_temp + dT)
+        settings = QuantumConfigSettings(kB, h_bar, n_configs, base_temp + dT)
+        # settings = ClassicalConfigSettings(kB, n_configs, base_temp + dT)
         configs, velos = canonical_configs_and_velocities(settings, freqs, phi, atom_masses)
 
         U = energy_from_potential(configs, sys_eq, pot, energy_unit(pot))
@@ -156,6 +156,16 @@ function run_loop_dUdT(ifc_path, pot::StillingerWeberSilicon, crys::Crystal, bas
     return cv_U, cv_K, cv_E
 end
 
+function bose_einstein(freq, temp, kB, hbar)
+    x =  upreferred((hbar * freq) / (kB * temp))
+    return 1 / (exp(x) - 1)
+end
+
+function hld_heat_capapacity(kB, h_bar, T, freqs)
+    nᵢ = bose_einstein.(freqs, T, kB, h_bar)
+    return sum((1/(kB*T*T)) .* (h_bar * freqs).^2 .* nᵢ .* (nᵢ .+ 1))
+end
+
 
 crys = Diamond(5.43u"Å", :Si, SVector(3,3,3))
 pot = StillingerWeberSilicon()
@@ -167,8 +177,38 @@ path = (T) -> "Z:/emeitz/Data/ForceConstants/AvgINM_SW/AvgIFC_SW_3UC_$(ustrip(T)
 
 paths = path.(temps)
 
-# cvs = run_loop.(paths, Ref(pot), Ref(crys), temps, Ref(n_configs))
-
+# cvs = run_loop_var.(paths, Ref(pot), Ref(crys), temps, Ref(n_configs))
 
 dTs_percents = [-0.01, -0.005, 0.0, 0.005, 0.01]
-run_loop_dUdT.(paths, Ref(pot), Ref(crys), temps, n_configs, Ref(dTs_percents))
+heat_caps = run_loop_dUdT.(paths, Ref(pot), Ref(crys), temps, n_configs, Ref(dTs_percents))
+
+hld_heat_caps = []
+kB = uconvert(u"eV / K", Unitful.k)
+h_bar = uconvert(u"eV*s", Unitful.ħ)
+for temp in temps
+    freqs_sq = load(path(temp), "freqs_sq")
+    freqs = Float32.(sqrt.(freqs_sq))
+
+    freqs = freqs[4:end] #remove rigid translation
+
+    freq_unit = sqrt(u"eV / Å^2 / u") #* ASSUME SW
+    freqs *= freq_unit
+
+    push!(hld_heat_caps, hld_heat_capapacity(kB, h_bar, temp, freqs))
+end
+
+cv_Us = []
+cv_Ks = []
+cv_Es = []
+for (cv_U, cv_K, cv_E) in heat_caps
+    push!(cv_Us, cv_U)
+    push!(cv_Ks, cv_K)
+    push!(cv_Es, cv_E)
+end
+
+scatter(temps, cv_Es, label="d<E>/dT", xlabel="Temperature",
+         ylabel="Cv / N kB", title="Heat Capacity of SW Silicon (Canonical Configs)",
+         legend = :bottomright, markersize = 7)
+scatter!(temps, upreferred.(hld_heat_caps /(3*n_atoms(sys_eq) * kB)), 
+            label="Harmonic Lattice Dynamics", markersize = 7)
+savefig("C:/Users/ejmei/Box/Research/Projects/QuantumCv/SW_Cv_vs_HLD.png")
