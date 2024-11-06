@@ -127,8 +127,9 @@ function canonical_configs_and_velocities(CM::ConfigSettings, freqs::AbstractVec
         tmp .*= randn_storage
         configs[:, n] .= vec(sum(tmp, dims=1))
 
-        # tmp_reinterpret = reinterpret(reinterpret_type, tmp)
-        #tmp_reinterpret .= tmp .* freqs_view
+        randn!(randn_storage)
+        copy!(tmp, phi_A)
+        tmp .*= randn_storage
         tmp2 .= tmp .* freqs_view
 
         velos[:, n] .= vec(sum(tmp2, dims=1))
