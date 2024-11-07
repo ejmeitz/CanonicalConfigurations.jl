@@ -1,4 +1,4 @@
-export canonical_configs, canonical_configs_and_velocities, mean_amplitude
+export canonical_configs, canonical_configs_and_velocities, canonical_velocities, mean_amplitude
 
 function bose_einstein(freq, temp, kB, hbar)
     x =  upreferred((hbar * freq) / (kB * temp))
@@ -142,7 +142,7 @@ end
 
 function canonical_velocities(CM::ConfigSettings, freqs::AbstractVector,
     phi::AbstractMatrix, atom_masses::AbstractVector;
-    n_threads::Int = Threads.nthreads(), D::Int = 3, time_unit = u"ps")
+    n_threads::Int = Threads.nthreads(), D::Int = 3, length_unit = u"Å", time_unit = u"ps")
 
     N_atoms = Int(length(freqs) / D)
 
@@ -160,7 +160,7 @@ function canonical_velocities(CM::ConfigSettings, freqs::AbstractVector,
     phi_A = phi_view_T .* mean_amplitude_matrix # D*N_atoms x D*N_atoms - D
     freq_unit = unit(first(freqs_view))
     
-    p = Progress(CM.n_configs; desc="Generating Disps & Velos", dt = 0.1, color = :yellow)
+    p = Progress(CM.n_configs; desc="Generating Velos", dt = 0.1, color = :green)
     # reinterpret_type = typeof(first(phi_A) * freq_unit)
     @tasks for n in 1:CM.n_configs
         @set begin
